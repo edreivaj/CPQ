@@ -1,0 +1,16 @@
+# Buildlovers CPQ - Dependencias
+# Python >= 3.8
+
+# Procesamiento geoespacial
+geopandas>=0.12.0
+shapely>=2.0.0
+pyproj>=3.4.0
+
+# Procesamiento raster
+rasterio>=1.3.0
+
+# Computación numérica
+numpy>=1.23.0
+
+# Peticiones HTTP
+requests>=2.28.0
