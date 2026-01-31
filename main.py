@@ -100,21 +100,37 @@ def main():
         print("\n[PROXY] Analizando entorno construido (250m)...")
 
         try:
-            # NOTA: Aquí necesitarías obtener parcelas y edificios del contexto
-            # Esto requiere servicios adicionales del Catastro o capas locales
+            # OPCIÓN 1: Intentar obtener datos vía WFS del Catastro
+            # ADVERTENCIA: El Catastro WFS puede rechazar consultas grandes
+            # Si falla, usa la Opción 2 (archivos locales)
 
-            # Opción 1: Si tienes servicio WFS de parcelas y edificios:
-            # parcels_nearby = catastro_svc.get_parcels_in_bbox(bbox_proxy)
-            # buildings_nearby = catastro_svc.get_buildings_in_bbox(bbox_proxy)
+            print("  [1/3] Intentando obtener datos vía WFS del Catastro...")
+            parcels_nearby = catastro_svc.get_parcels_in_bbox(bbox_proxy)
+            buildings_nearby = catastro_svc.get_buildings_in_bbox(bbox_proxy)
 
-            # Opción 2: Si tienes archivos locales:
-            # import geopandas as gpd
-            # parcels_nearby = gpd.read_file("data/parcels.gpkg", bbox=bbox_proxy)
-            # buildings_nearby = gpd.read_file("data/buildings.gpkg", bbox=bbox_proxy)
+            # OPCIÓN 2: Si WFS falla, intentar leer desde archivos locales
+            if parcels_nearby is None or buildings_nearby is None:
+                print("\n  [2/3] WFS no disponible, buscando archivos locales...")
+                import os
 
-            # Por ahora, simulamos que no están disponibles
-            parcels_nearby = None
-            buildings_nearby = None
+                parcels_file = "/home/user/CPQ/data/parcels.gpkg"
+                buildings_file = "/home/user/CPQ/data/buildings.gpkg"
+
+                if os.path.exists(parcels_file) and os.path.exists(buildings_file):
+                    print(f"    ✓ Encontrados archivos locales")
+                    parcels_nearby = gpd.read_file(parcels_file, bbox=bbox_proxy)
+                    buildings_nearby = gpd.read_file(buildings_file, bbox=bbox_proxy)
+                    print(f"    ✓ Parcelas cargadas: {len(parcels_nearby)}")
+                    print(f"    ✓ Edificios cargados: {len(buildings_nearby)}")
+                else:
+                    print(f"    ✗ No se encontraron archivos locales")
+                    print(f"      Buscados: {parcels_file}, {buildings_file}")
+                    print(f"\n    💡 Para activar el proxy, necesitas:")
+                    print(f"       1. Descargar capas de https://centrodedescargas.cnig.es/")
+                    print(f"       2. Guardar en /home/user/CPQ/data/ como .gpkg")
+                    print(f"       3. Ver instrucciones en ACTIVAR_PROXY.md")
+                    parcels_nearby = None
+                    buildings_nearby = None
 
             if parcels_nearby is not None and buildings_nearby is not None:
                 # Obtener viales OSM
