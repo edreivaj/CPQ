@@ -86,7 +86,7 @@ def main():
 
     # Flag para activar/desactivar proxy
     # En producción, poner True cuando tengas acceso a capas completas del Catastro
-    USE_PROXY = False  # Cambiar a True cuando tengas parcels_gdf y buildings_gdf
+    USE_PROXY = True  # ✓ ACTIVADO - Intentará usar WFS o archivos locales
 
     proxy_result = None
     retranqueo_frontal_efectivo = CFG.RETRANQUEO_FRONTAL_M
