@@ -23,7 +23,9 @@ from cpq.analysis import (
     compute_slab_cost,
     compute_earthworks_cost,
     compute_containment_cost,
-    compute_fees_total
+    compute_fees_total,
+    compute_urbanismo_proxy,
+    ProxyConfig
 )
 from cpq.utils import bbox_from_gdf, create_house_pad, compute_monthly_payment
 from cpq.model_filter import filter_valid_models
@@ -75,6 +77,107 @@ def main():
     print(f"\nParcela obtenida. Área: {parcel_area_m2:,.2f} m²")
 
     # =========================================================================
+    # PASO 3.5: Análisis de Urbanismo Proxy (Inferencia Estadística)
+    # =========================================================================
+
+    print("\n" + "=" * 60)
+    print("ANÁLISIS DE CONTEXTO URBANÍSTICO (PROXY)")
+    print("=" * 60)
+
+    # Flag para activar/desactivar proxy
+    # En producción, poner True cuando tengas acceso a capas completas del Catastro
+    USE_PROXY = False  # Cambiar a True cuando tengas parcels_gdf y buildings_gdf
+
+    proxy_result = None
+    retranqueo_frontal_efectivo = CFG.RETRANQUEO_FRONTAL_M
+    retranqueo_lateral_efectivo = CFG.RETRANQUEO_LATERAL_M
+    ocupacion_efectiva = CFG.OCUPACION_PORCENTAJE / 100.0
+    edificabilidad_efectiva = CFG.EDIFICABILIDAD_M2T_M2S
+
+    bbox_proxy = bbox_from_gdf(gdf_parcel, buffer=300.0)  # Buffer más amplio para proxy
+
+    if USE_PROXY:
+        print("\n[PROXY] Analizando entorno construido (250m)...")
+
+        try:
+            # NOTA: Aquí necesitarías obtener parcelas y edificios del contexto
+            # Esto requiere servicios adicionales del Catastro o capas locales
+
+            # Opción 1: Si tienes servicio WFS de parcelas y edificios:
+            # parcels_nearby = catastro_svc.get_parcels_in_bbox(bbox_proxy)
+            # buildings_nearby = catastro_svc.get_buildings_in_bbox(bbox_proxy)
+
+            # Opción 2: Si tienes archivos locales:
+            # import geopandas as gpd
+            # parcels_nearby = gpd.read_file("data/parcels.gpkg", bbox=bbox_proxy)
+            # buildings_nearby = gpd.read_file("data/buildings.gpkg", bbox=bbox_proxy)
+
+            # Por ahora, simulamos que no están disponibles
+            parcels_nearby = None
+            buildings_nearby = None
+
+            if parcels_nearby is not None and buildings_nearby is not None:
+                # Obtener viales OSM
+                roads_gdf = osm_svc.fetch_roads(bbox_proxy)
+
+                # Ejecutar proxy
+                proxy_result = compute_urbanismo_proxy(
+                    target_parcel_gdf=gdf_parcel,
+                    parcels_gdf=parcels_nearby,
+                    buildings_gdf=buildings_nearby,
+                    roads_gdf=roads_gdf if not roads_gdf.empty else None,
+                    cfg=ProxyConfig()
+                )
+
+                print(f"\n[PROXY] Análisis completado")
+                print(f"  Confianza: {proxy_result.confidence_label.upper()} "
+                      f"(score: {proxy_result.confidence_score:.2f})")
+                print(f"  Vecinos analizados: {proxy_result.stats.n_parcels_used}")
+                print(f"  Parcelas comparables: {proxy_result.stats.n_comparables}")
+
+                if proxy_result.use_proxy:
+                    print("\n  ✓ USANDO PARÁMETROS INFERIDOS DEL ENTORNO")
+                    print(f"    Retranqueo frontal: {proxy_result.retranqueo_frontal_m:.2f}m "
+                          f"(default: {CFG.RETRANQUEO_FRONTAL_M:.2f}m)")
+                    print(f"    Retranqueo lateral: {proxy_result.retranqueo_lateral_m:.2f}m "
+                          f"(default: {CFG.RETRANQUEO_LATERAL_M:.2f}m)")
+                    print(f"    Ocupación máxima: {proxy_result.ocupacion_max*100:.1f}% "
+                          f"(default: {CFG.OCUPACION_PORCENTAJE:.1f}%)")
+                    print(f"    Edificabilidad: {proxy_result.edificabilidad_m2t_m2s:.2f} "
+                          f"(default: {CFG.EDIFICABILIDAD_M2T_M2S:.2f})")
+
+                    # Sustituir valores
+                    retranqueo_frontal_efectivo = proxy_result.retranqueo_frontal_m
+                    retranqueo_lateral_efectivo = proxy_result.retranqueo_lateral_m
+                    ocupacion_efectiva = proxy_result.ocupacion_max
+                    edificabilidad_efectiva = proxy_result.edificabilidad_m2t_m2s
+
+                else:
+                    print(f"\n  ⚠ Confianza {proxy_result.confidence_label} - usando defaults")
+                    print(f"    (Entorno heterogéneo o datos insuficientes)")
+
+            else:
+                print("\n  ⚠ Capas de contexto no disponibles")
+                print("    Se requiere acceso a parcelas y edificios del Catastro")
+                print("    Usando valores por defecto de configuración")
+
+        except Exception as e:
+            print(f"\n  ⚠ Error en análisis proxy: {e}")
+            print("    Usando valores por defecto")
+
+    else:
+        print("\n[PROXY] Desactivado (USE_PROXY = False)")
+        print("  Usando valores normativos por defecto:")
+        print(f"    Retranqueo frontal: {CFG.RETRANQUEO_FRONTAL_M:.2f}m")
+        print(f"    Retranqueo lateral: {CFG.RETRANQUEO_LATERAL_M:.2f}m")
+        print(f"    Ocupación máxima: {CFG.OCUPACION_PORCENTAJE:.1f}%")
+        print(f"    Edificabilidad: {CFG.EDIFICABILIDAD_M2T_M2S:.2f}")
+        print("\n  Para activar el proxy:")
+        print("    1. Obtén capas de parcelas y edificios del área")
+        print("    2. Cambia USE_PROXY = True en main.py")
+        print("    3. Implementa get_parcels_in_bbox() y get_buildings_in_bbox()")
+
+    # =========================================================================
     # PASO 4: Análisis de límites
     # =========================================================================
 
@@ -88,17 +191,37 @@ def main():
         print("Error: No se pudo calcular la caja edificable.")
         sys.exit(1)
 
-    buildable_area_m2 = analysis_result.buildable_geometry.area
+    # Usar envolvente del proxy si está disponible y tiene confianza
+    if proxy_result and proxy_result.use_proxy and proxy_result.buildable_envelope:
+        buildable_geometry = proxy_result.buildable_envelope
+        buildable_area_m2 = proxy_result.buildable_area_m2
+        print(f"\n[PROXY] Usando envolvente edificable inferida: {buildable_area_m2:,.2f} m²")
+    else:
+        buildable_geometry = analysis_result.buildable_geometry
+        buildable_area_m2 = analysis_result.buildable_geometry.area
 
     # =========================================================================
     # PASO 5: Filtrar modelos válidos
     # =========================================================================
+
+    # Actualizar temporalmente el config si usamos proxy
+    # (para que filter_valid_models use los valores correctos)
+    original_ocupacion = CFG.OCUPACION_PORCENTAJE
+    original_edificabilidad = CFG.EDIFICABILIDAD_M2T_M2S
+
+    if proxy_result and proxy_result.use_proxy:
+        CFG.OCUPACION_PORCENTAJE = ocupacion_efectiva * 100
+        CFG.EDIFICABILIDAD_M2T_M2S = edificabilidad_efectiva
 
     valid_models = filter_valid_models(
         num_bedrooms,
         parcel_area_m2,
         buildable_area_m2
     )
+
+    # Restaurar valores originales
+    CFG.OCUPACION_PORCENTAJE = original_ocupacion
+    CFG.EDIFICABILIDAD_M2T_M2S = original_edificabilidad
 
     if not valid_models:
         print("\n¡Atención! Ningún modelo estándar encaja.")
@@ -133,7 +256,7 @@ def main():
     # =========================================================================
 
     buildable_gdf = gpd.GeoDataFrame(
-        [{"geometry": analysis_result.buildable_geometry}],
+        [{"geometry": buildable_geometry}],  # Usa la geometría correcta (proxy o default)
         crs=CFG.ETRS89_UTM30N
     )
 
