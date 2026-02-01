@@ -1,5 +1,5 @@
 """
-Módulos de análisis (terreno, límites, costes)
+Módulos de análisis (terreno, límites, costes, urbanismo proxy)
 """
 
 from .boundaries import ParcelBoundaryAnalyzer
@@ -19,6 +19,12 @@ from .costs import (
     compute_containment_cost,
     compute_fees_total
 )
+from .urbanismo_proxy import (
+    compute_urbanismo_proxy,
+    ProxyConfig,
+    ProxyResult,
+    ProxyStats
+)
 
 __all__ = [
     'ParcelBoundaryAnalyzer',
@@ -33,5 +39,9 @@ __all__ = [
     'compute_slab_cost',
     'compute_earthworks_cost',
     'compute_containment_cost',
-    'compute_fees_total'
+    'compute_fees_total',
+    'compute_urbanismo_proxy',
+    'ProxyConfig',
+    'ProxyResult',
+    'ProxyStats'
 ]
