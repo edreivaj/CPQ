@@ -37,6 +37,22 @@ from cpq.cli import (
     select_extras,
     get_financing_parameters
 )
+from cpq.cli_parametric import (
+    select_mode,
+    display_parametric_limits,
+    display_parametric_config,
+    get_parametric_input,
+    confirm_use_suggested,
+    confirm_parametric_config,
+)
+from cpq.parametric import (
+    ParametricLimitsCalculator,
+    ShapeGenerator,
+    ParametricValidator,
+    ParametricModelAdapter,
+    TechnicalConstraints,
+)
+from cpq.parametric.validator import ProgramEstimator
 
 
 def main():
@@ -214,44 +230,150 @@ def main():
         buildable_area_m2 = analysis_result.buildable_geometry.area
 
     # =========================================================================
-    # PASO 5: Filtrar modelos válidos
+    # PASO 5: Seleccionar modo (Catálogo o Paramétrico)
     # =========================================================================
 
-    # Actualizar temporalmente el config si usamos proxy
-    # (para que filter_valid_models use los valores correctos)
-    original_ocupacion = CFG.OCUPACION_PORCENTAJE
-    original_edificabilidad = CFG.EDIFICABILIDAD_M2T_M2S
+    mode = select_mode()
 
-    if proxy_result and proxy_result.use_proxy:
-        CFG.OCUPACION_PORCENTAJE = ocupacion_efectiva * 100
-        CFG.EDIFICABILIDAD_M2T_M2S = edificabilidad_efectiva
+    if mode == "parametric":
+        # -----------------------------------------------------------------
+        # MODO PARAMÉTRICO
+        # -----------------------------------------------------------------
+        constraints = TechnicalConstraints()
+        limits_calc = ParametricLimitsCalculator()
+        shape_gen = ShapeGenerator(constraints)
+        validator = ParametricValidator(constraints)
+        program_est = ProgramEstimator(constraints)
 
-    valid_models = filter_valid_models(
-        num_bedrooms,
-        parcel_area_m2,
-        buildable_area_m2
-    )
+        limits = limits_calc.calculate_limits(
+            parcel_area_m2,
+            buildable_geometry,
+            ocupacion_efectiva if proxy_result and proxy_result.use_proxy else None,
+            edificabilidad_efectiva if proxy_result and proxy_result.use_proxy else None,
+        )
 
-    # Restaurar valores originales
-    CFG.OCUPACION_PORCENTAJE = original_ocupacion
-    CFG.EDIFICABILIDAD_M2T_M2S = original_edificabilidad
+        display_parametric_limits(limits)
 
-    if not valid_models:
-        print("\n¡Atención! Ningún modelo estándar encaja.")
-        print("Se requiere ITP (Implantación Totalmente Personalizada).")
-        sys.exit(0)
+        suggested_pb = limits.suggested_pb_m2
+        suggested_p1 = limits.suggested_p1_m2
+        suggested_shape = limits.suggested_shape
 
-    # =========================================================================
-    # PASO 6: Seleccionar modelo
-    # =========================================================================
+        pb_floor = shape_gen.create_floor_config(
+            0, suggested_pb, suggested_shape, limits.box_width_m, limits.box_length_m
+        )
+        p1_floor = shape_gen.create_floor_config(
+            1, suggested_p1, suggested_shape, limits.box_width_m, limits.box_length_m
+        )
 
-    selected_model = select_model_interactive(valid_models)
+        from cpq.parametric import ParametricConfig
+        suggested_config = ParametricConfig(
+            config_id="SUGGESTED",
+            parcel_area_m2=parcel_area_m2,
+            buildable_box=buildable_geometry,
+            buildable_area_m2=buildable_area_m2,
+            max_ocupacion_m2=limits.max_footprint_m2,
+            max_edificabilidad_m2=limits.max_built_area_m2,
+            num_floors=2,
+            ground_floor=pb_floor,
+            first_floor=p1_floor,
+            total_footprint_m2=suggested_pb,
+            total_built_m2=suggested_pb + suggested_p1,
+            overall_shape=suggested_shape,
+        )
 
-    if selected_model is None:
-        print("No se seleccionó ningún modelo.")
-        sys.exit(0)
+        bedrooms, bathrooms = program_est.estimate_program(
+            suggested_config.total_built_m2, 2
+        )
+        suggested_config.estimated_bedrooms = bedrooms
+        suggested_config.estimated_bathrooms = bathrooms
 
-    print(f"\n✓ Modelo seleccionado: {selected_model['nombre']}")
+        is_valid, errors = validator.validate_config(suggested_config, limits)
+        suggested_config.is_valid = is_valid
+        suggested_config.validation_errors = errors
+
+        print("\n--- CONFIGURACIÓN SUGERIDA ---")
+        display_parametric_config(suggested_config)
+
+        if confirm_use_suggested():
+            parametric_config = suggested_config
+        else:
+            pb_m2, p1_m2, shape = get_parametric_input(limits)
+
+            pb_floor = shape_gen.create_floor_config(
+                0, pb_m2, shape, limits.box_width_m, limits.box_length_m
+            )
+            p1_floor = None
+            if p1_m2 > 0:
+                p1_floor = shape_gen.create_floor_config(
+                    1, p1_m2, shape, limits.box_width_m, limits.box_length_m
+                )
+
+            parametric_config = ParametricConfig(
+                config_id="CUSTOM",
+                parcel_area_m2=parcel_area_m2,
+                buildable_box=buildable_geometry,
+                buildable_area_m2=buildable_area_m2,
+                max_ocupacion_m2=limits.max_footprint_m2,
+                max_edificabilidad_m2=limits.max_built_area_m2,
+                num_floors=2 if p1_m2 > 0 else 1,
+                ground_floor=pb_floor,
+                first_floor=p1_floor,
+                total_footprint_m2=pb_m2,
+                total_built_m2=pb_m2 + p1_m2,
+                overall_shape=shape,
+            )
+
+            bedrooms, bathrooms = program_est.estimate_program(
+                parametric_config.total_built_m2, parametric_config.num_floors
+            )
+            parametric_config.estimated_bedrooms = bedrooms
+            parametric_config.estimated_bathrooms = bathrooms
+
+            is_valid, errors = validator.validate_config(parametric_config, limits)
+            parametric_config.is_valid = is_valid
+            parametric_config.validation_errors = errors
+
+            display_parametric_config(parametric_config)
+
+            if not confirm_parametric_config(parametric_config):
+                print("Configuración cancelada.")
+                sys.exit(0)
+
+        selected_model = ParametricModelAdapter.to_model_dict(parametric_config)
+        print(f"\n✓ Configuración paramétrica: {selected_model['nombre']}")
+
+    else:
+        # -----------------------------------------------------------------
+        # MODO CATÁLOGO (flujo existente)
+        # -----------------------------------------------------------------
+        original_ocupacion = CFG.OCUPACION_PORCENTAJE
+        original_edificabilidad = CFG.EDIFICABILIDAD_M2T_M2S
+
+        if proxy_result and proxy_result.use_proxy:
+            CFG.OCUPACION_PORCENTAJE = ocupacion_efectiva * 100
+            CFG.EDIFICABILIDAD_M2T_M2S = edificabilidad_efectiva
+
+        valid_models = filter_valid_models(
+            num_bedrooms,
+            parcel_area_m2,
+            buildable_area_m2
+        )
+
+        CFG.OCUPACION_PORCENTAJE = original_ocupacion
+        CFG.EDIFICABILIDAD_M2T_M2S = original_edificabilidad
+
+        if not valid_models:
+            print("\n¡Atención! Ningún modelo estándar encaja.")
+            print("Puedes usar el modo Paramétrico [2] para diseñar a medida.")
+            sys.exit(0)
+
+        selected_model = select_model_interactive(valid_models)
+
+        if selected_model is None:
+            print("No se seleccionó ningún modelo.")
+            sys.exit(0)
+
+        print(f"\n✓ Modelo seleccionado: {selected_model['nombre']}")
 
     # =========================================================================
     # PASO 7: Descargar MDT
