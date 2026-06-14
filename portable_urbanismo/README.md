@@ -125,3 +125,27 @@ Edítalos para adaptarlos a tu normativa base.
   retranqueos), no un retranqueo diferenciado por lado.
 - Pensado para parcelas sensiblemente cuadrangulares (la clasificación frente/fondo
   asume el lado opuesto). Para formas muy irregulares la clasificación es aproximada.
+
+## Instalación como dependencia (sin copiar ficheros)
+
+Gracias a `pyproject.toml`, el módulo es instalable con pip. Tras instalar, el
+import es siempre `from urbanismo_proxy import ...`.
+
+**a) Desde git (auto-descarga desde GitHub):**
+
+```bash
+pip install "git+https://github.com/edreivaj/CPQ.git@<tag-o-rama>#subdirectory=portable_urbanismo"
+```
+
+Añade esa misma línea al `requirements.txt`/`pyproject.toml` del otro proyecto para
+que se resuelva sola en cada instalación. Si el repo es privado, la URL necesita
+credenciales (token PAT o SSH). No fijes a una rama de trabajo: usa un **tag** o `main`.
+
+**b) Desde una ruta local (ambos proyectos en el mismo equipo, con auto-actualización):**
+
+```bash
+pip install -e /ruta/a/CPQ/portable_urbanismo
+```
+
+`-e` (editable) deja el módulo enlazado: los cambios en el origen se reflejan sin
+reinstalar.
