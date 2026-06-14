@@ -1,0 +1,5 @@
+# Dependencias mínimas del módulo portable `urbanismo_proxy.py`
+# (pandas y pyproj se instalan de forma transitiva con geopandas)
+numpy>=1.23.0
+shapely>=2.0.0
+geopandas>=0.12.0
